@@ -15,7 +15,11 @@ export interface AppConfig {
   analyticsBatchSize: number;
   analyticsFlushIntervalMs: number;
   analyticsStreamMaxLen: number;
+  analyticsClaimMinIdleMs: number;
+  analyticsClaimSweepIntervalMs: number;
   selfIpLimitPerMinute: number;
+  selfRateLimitWindowMs: number;
+  selfRateLimitMaxTrackedIps: number;
 }
 
 export interface ClientLimitConfig {

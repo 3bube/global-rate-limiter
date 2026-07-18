@@ -9,12 +9,6 @@ import { USAGE_STREAM_KEY } from './eventStream';
 export const GROUP = 'analytics-workers';
 const CONSUMER = `${hostname()}-${process.pid}`;
 
-/** How long an entry may sit unacked in another consumer's pending list
- *  before we assume that consumer died and claim the entry for ourselves. */
-const CLAIM_MIN_IDLE_MS = 60_000;
-/** How often to sweep for stale pending entries. */
-const CLAIM_SWEEP_INTERVAL_MS = 30_000;
-
 export interface StreamEntry {
   id: string;
   clientId: string;
@@ -36,7 +30,7 @@ export interface StreamEntry {
  *
  *  - Worker dies AFTER XREADGROUP but BEFORE XACK: the entries sit in that
  *    consumer's pending list. claimStale() (XAUTOCLAIM) periodically adopts
- *    entries idle for over CLAIM_MIN_IDLE_MS so they are eventually
+ *    entries idle for over config.analyticsClaimMinIdleMs so they are eventually
  *    written instead of being stranded forever.
  *  - Worker dies AFTER the Postgres INSERT but BEFORE XACK: the entries get
  *    redelivered and inserted again -- so the insert carries the unique
@@ -141,9 +135,9 @@ export async function runWorker(signal: { stopped: boolean }): Promise<void> {
 
   while (!signal.stopped) {
     try {
-      if (Date.now() - lastClaimSweep >= CLAIM_SWEEP_INTERVAL_MS) {
+      if (Date.now() - lastClaimSweep >= config.analyticsClaimSweepIntervalMs) {
         lastClaimSweep = Date.now();
-        const stale = await claimStale(redis, CONSUMER, CLAIM_MIN_IDLE_MS);
+        const stale = await claimStale(redis, CONSUMER, config.analyticsClaimMinIdleMs);
         if (stale.length > 0) {
           logger.warn('Recovered stale pending entries', { count: stale.length });
           await flush(pool, redis, stale);

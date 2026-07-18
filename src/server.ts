@@ -43,7 +43,11 @@ async function main(): Promise<void> {
 
   const app = Fastify({ logger: true });
 
-  app.addHook('onRequest', selfRateLimit(config.selfIpLimitPerMinute));
+  app.addHook('onRequest', selfRateLimit({
+    limitPerMinute: config.selfIpLimitPerMinute,
+    windowMs: config.selfRateLimitWindowMs,
+    maxTrackedIps: config.selfRateLimitMaxTrackedIps,
+  }));
   app.addHook('onRequest', apiKeyAuth(config.apiKey));
 
   await app.register(fastifyStatic, {

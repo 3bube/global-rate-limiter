@@ -20,15 +20,22 @@ export function apiKeyAuth(apiKey: string): OnRequestHook {
   };
 }
 
+export interface SelfRateLimitOptions {
+  limitPerMinute: number;
+  /** Window length in ms. Defaults to 60s to match "per minute". */
+  windowMs?: number;
+  /** How many distinct IPs to track before pruning/resetting the map. */
+  maxTrackedIps?: number;
+}
+
 /**
  * Fixed-window per-IP budget for the limiter's own endpoints, so the rate
  * limiter is not itself a free amplification target. Deliberately in-memory
  * and per-instance: this is abuse protection for *this* process, not the
  * shared client-quota accounting (which lives in Redis).
  */
-export function selfRateLimit(limitPerMinute: number): OnRequestHook {
-  const WINDOW_MS = 60_000;
-  const MAX_TRACKED_IPS = 10_000;
+export function selfRateLimit(options: SelfRateLimitOptions): OnRequestHook {
+  const { limitPerMinute, windowMs = 60_000, maxTrackedIps = 10_000 } = options;
   const windows = new Map<string, { count: number; windowStart: number }>();
 
   return async (req, reply) => {
@@ -36,15 +43,15 @@ export function selfRateLimit(limitPerMinute: number): OnRequestHook {
 
     const now = Date.now();
     const entry = windows.get(req.ip);
-    if (!entry || now - entry.windowStart >= WINDOW_MS) {
+    if (!entry || now - entry.windowStart >= windowMs) {
       // Bound memory before inserting a fresh window: drop expired entries,
       // and if a flood of unique IPs is still over the cap, reset entirely
       // rather than grow without limit.
-      if (windows.size >= MAX_TRACKED_IPS) {
+      if (windows.size >= maxTrackedIps) {
         for (const [ip, w] of windows) {
-          if (now - w.windowStart >= WINDOW_MS) windows.delete(ip);
+          if (now - w.windowStart >= windowMs) windows.delete(ip);
         }
-        if (windows.size >= MAX_TRACKED_IPS) windows.clear();
+        if (windows.size >= maxTrackedIps) windows.clear();
       }
       windows.set(req.ip, { count: 1, windowStart: now });
       return;

@@ -45,7 +45,7 @@ function makeDeps(result: RateLimitResult = okResult()): TestDeps {
 
 function buildApp(deps: TestDeps, selfLimitPerMinute = 1000): FastifyInstance {
   const app = Fastify();
-  app.addHook('onRequest', selfRateLimit(selfLimitPerMinute));
+  app.addHook('onRequest', selfRateLimit({ limitPerMinute: selfLimitPerMinute }));
   app.addHook('onRequest', apiKeyAuth(API_KEY));
   registerRoutes(app, {
     limiter: deps.limiter,

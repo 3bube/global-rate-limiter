@@ -39,6 +39,16 @@ export const config: AppConfig = {
   // Upper bound on the usage-events stream so a dead/slow worker can never
   // grow Redis without limit (which would eventually take the limiter down).
   analyticsStreamMaxLen: intEnv('ANALYTICS_STREAM_MAXLEN', 100_000),
+  // How long an entry may sit unacked in a dead consumer's pending list
+  // before another consumer claims it (XAUTOCLAIM) instead of it being
+  // stranded forever.
+  analyticsClaimMinIdleMs: intEnv('ANALYTICS_CLAIM_MIN_IDLE_MS', 60_000),
+  // How often the worker sweeps for stale pending entries.
+  analyticsClaimSweepIntervalMs: intEnv('ANALYTICS_CLAIM_SWEEP_INTERVAL_MS', 30_000),
   // Per-source-IP budget for the limiter's own API (self-protection).
   selfIpLimitPerMinute: intEnv('SELF_IP_LIMIT_PER_MINUTE', 600),
+  // Window length for the self rate limit above, and how many distinct IPs
+  // to track before pruning/resetting to keep the in-memory map bounded.
+  selfRateLimitWindowMs: intEnv('SELF_RATE_LIMIT_WINDOW_MS', 60_000),
+  selfRateLimitMaxTrackedIps: intEnv('SELF_RATE_LIMIT_MAX_TRACKED_IPS', 10_000),
 };
