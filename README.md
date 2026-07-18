@@ -165,3 +165,4 @@ tests/
   integration/     require a real Redis + Postgres (docker compose up -d redis postgres)
   load/            k6 script
 ```
+# global-rate-limiter
