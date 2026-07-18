@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Rate Limiter Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.3/chart.umd.min.js"></script>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 40px auto; color: #1a1a1a; }
+  h1 { font-size: 1.4rem; }
+  .controls { display: flex; gap: 12px; align-items: center; margin-bottom: 24px; }
+  select, button { padding: 6px 10px; font-size: 0.95rem; }
+  .stats { display: flex; gap: 16px; margin-bottom: 24px; }
+  .stat { border: 1px solid #ddd; border-radius: 8px; padding: 12px 16px; flex: 1; }
+  .stat .label { font-size: 0.8rem; color: #666; }
+  .stat .value { font-size: 1.4rem; font-weight: 600; }
+  canvas { max-height: 360px; }
+</style>
+</head>
+<body>
+  <h1>Client Usage Dashboard</h1>
+  <div class="controls">
+    <label>Client: <select id="clientSelect"></select></label>
+    <label>Window:
+      <select id="daysSelect">
+        <option value="10">Last 10 days</option>
+        <option value="15">Last 15 days</option>
+        <option value="30" selected>Last 30 days</option>
+      </select>
+    </label>
+    <button id="refresh">Refresh</button>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="label">Total requests</div><div class="value" id="statTotal">-</div></div>
+    <div class="stat"><div class="label">Denied</div><div class="value" id="statDenied">-</div></div>
+    <div class="stat"><div class="label">Avg check latency</div><div class="value" id="statLatency">-</div></div>
+  </div>
+
+  <canvas id="trendChart"></canvas>
+
+  <script>
+    let chart;
+
+    async function loadClients() {
+      const res = await fetch('/v1/clients');
+      const { clients } = await res.json();
+      const select = document.getElementById('clientSelect');
+      select.innerHTML = clients
+        .map((c) => `<option value="${c.clientId}">${c.clientId} (${c.limit}/${c.windowSeconds}s)</option>`)
+        .join('');
+    }
+
+    async function loadUsage() {
+      const clientId = document.getElementById('clientSelect').value;
+      const days = document.getElementById('daysSelect').value;
+      if (!clientId) return;
+
+      const res = await fetch(`/v1/clients/${encodeURIComponent(clientId)}/usage?days=${days}`);
+      const data = await res.json();
+      const points = data.points || [];
+
+      const total = points.reduce((sum, p) => sum + p.requestCount, 0);
+      const denied = points.reduce((sum, p) => sum + p.deniedCount, 0);
+      const avgLatency = points.length
+        ? points.reduce((sum, p) => sum + p.avgLatencyMs, 0) / points.length
+        : 0;
+
+      document.getElementById('statTotal').textContent = total;
+      document.getElementById('statDenied').textContent = denied;
+      document.getElementById('statLatency').textContent = `${avgLatency.toFixed(2)} ms`;
+
+      const ctx = document.getElementById('trendChart');
+      const labels = points.map((p) => p.bucket);
+      const allowedSeries = points.map((p) => p.allowedCount);
+      const deniedSeries = points.map((p) => p.deniedCount);
+
+      if (chart) chart.destroy();
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            { label: 'Allowed', data: allowedSeries, borderColor: '#2a9c68', tension: 0.2 },
+            { label: 'Denied', data: deniedSeries, borderColor: '#cc3a21', tension: 0.2 },
+          ],
+        },
+        options: { responsive: true, scales: { y: { beginAtZero: true } } },
+      });
+    }
+
+    document.getElementById('refresh').addEventListener('click', loadUsage);
+    document.getElementById('clientSelect').addEventListener('change', loadUsage);
+    document.getElementById('daysSelect').addEventListener('change', loadUsage);
+
+    loadClients().then(loadUsage);
+  </script>
+</body>
+</html>

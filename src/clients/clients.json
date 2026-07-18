@@ -1,0 +1,4 @@
+[
+  { "clientId": "client-a", "limit": 100, "windowSeconds": 60 },
+  { "clientId": "client-b", "limit": 5000, "windowSeconds": 60 }
+]
