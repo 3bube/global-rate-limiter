@@ -53,6 +53,46 @@ describe('FailSafeRateLimiter', () => {
     expect(result.allowed).toBe(true);
   });
 
+  it('reports the client\'s real limit in fail-open responses when a fallback config source is provided', async () => {
+    const primary: RateLimiter = {
+      checkAndConsume: jest.fn().mockRejectedValue(new Error('down')),
+    };
+    const failSafe = new FailSafeRateLimiter(primary, {
+      failureThreshold: 1,
+      resetTimeoutMs: 1000,
+      commandTimeoutMs: 50,
+      fallbackConfig: {
+        getConfig: async () => ({ clientId: 'client-a', limit: 100, windowSeconds: 60 }),
+      },
+    });
+
+    const before = Date.now();
+    const result = await failSafe.checkAndConsume('client-a');
+    expect(result.degraded).toBe(true);
+    expect(result.allowed).toBe(true);
+    // The degraded response must keep the normal contract shape: a consumer
+    // parsing X-RateLimit-Remaining as an unsigned integer must never see -1.
+    expect(result.limit).toBe(100);
+    expect(result.remainingTokens).toBe(100);
+    expect(result.resetAtMs).toBeGreaterThanOrEqual(before + 60_000);
+  });
+
+  it('never returns negative sentinel values when failing open without a fallback', async () => {
+    const primary: RateLimiter = {
+      checkAndConsume: jest.fn().mockRejectedValue(new Error('down')),
+    };
+    const failSafe = new FailSafeRateLimiter(primary, {
+      failureThreshold: 1,
+      resetTimeoutMs: 1000,
+      commandTimeoutMs: 50,
+    });
+
+    const result = await failSafe.checkAndConsume('client-a');
+    expect(result.degraded).toBe(true);
+    expect(result.remainingTokens).toBeGreaterThanOrEqual(0);
+    expect(result.limit).toBeGreaterThanOrEqual(0);
+  });
+
   it('short-circuits and skips the primary once the breaker is OPEN', async () => {
     const primary: RateLimiter = {
       checkAndConsume: jest.fn().mockRejectedValue(new Error('down')),

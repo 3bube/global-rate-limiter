@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { UsagePoint, RouteDeps } from '../types';
 import { checkRequestSchema, usageQuerySchema } from '../schemas';
+import { logger } from '../logger';
 
 export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   const { limiter, events, clients, redis, pool } = deps;
@@ -28,6 +29,14 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     return { clients: clients.list() };
   });
 
+  // Re-reads clients.json so limits can be changed at runtime (edit the
+  // mounted file, then hit this) instead of requiring an image rebuild.
+  app.post('/v1/admin/clients/reload', async () => {
+    const count = clients.reload();
+    logger.info('Client registry reloaded', { count });
+    return { reloaded: count };
+  });
+
   app.post('/v1/check', async (req, reply) => {
     const parsed = checkRequestSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -36,6 +45,15 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     }
 
     const { clientId, cost } = parsed.data;
+
+    // Unknown clients are rejected outright. Handing out a default bucket
+    // to any string a caller invents would let one misbehaving caller
+    // create unbounded per-key state in Redis and sidestep onboarding.
+    if ((await clients.getConfig(clientId)) === undefined) {
+      reply.code(404);
+      return { error: 'unknown_client', clientId };
+    }
+
     const started = performance.now();
     const result = await limiter.checkAndConsume(clientId, cost ?? 1);
     const checkLatencyMs = performance.now() - started;
@@ -63,7 +81,14 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
       return { error: 'invalid_query', details: parsedQuery.error.flatten() };
     }
     const { clientId } = req.params;
-    const { days } = parsedQuery.data;
+    const { days, granularity, outcome } = parsedQuery.data;
+
+    // `granularity` is interpolated, not parameterized, because Postgres
+    // does not accept a bind parameter there — safe because zod has already
+    // constrained it to the enum 'day' | 'hour'.
+    const bucketFormat = granularity === 'hour' ? 'YYYY-MM-DD HH24:00' : 'YYYY-MM-DD';
+    const outcomeFilter =
+      outcome === 'allowed' ? 'AND allowed' : outcome === 'denied' ? 'AND NOT allowed' : '';
 
     const { rows } = await pool.query<{
       bucket: string;
@@ -74,13 +99,14 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     }>(
       `
       SELECT
-        to_char(date_trunc('day', occurred_at), 'YYYY-MM-DD') AS bucket,
+        to_char(date_trunc('${granularity}', occurred_at), '${bucketFormat}') AS bucket,
         COUNT(*) AS request_count,
         COUNT(*) FILTER (WHERE allowed) AS allowed_count,
         COUNT(*) FILTER (WHERE NOT allowed) AS denied_count,
         COALESCE(AVG(check_latency_ms), 0) AS avg_latency_ms
       FROM request_log
       WHERE client_id = $1 AND occurred_at >= now() - ($2 || ' days')::interval
+        ${outcomeFilter}
       GROUP BY 1
       ORDER BY 1 ASC
       `,
@@ -95,6 +121,6 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
       avgLatencyMs: Number(r.avg_latency_ms),
     }));
 
-    return { clientId, days, points };
+    return { clientId, days, granularity, outcome, points };
   });
 }

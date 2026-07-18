@@ -36,8 +36,13 @@ services:
       PORT: 3000
       REDIS_URL: redis://redis:6379
       DATABASE_URL: postgresql://ratelimiter:ratelimiter@postgres:5432/ratelimiter
+      API_KEY: ${API_KEY:-dev-api-key}
     ports:
       - "3000:3000"
+    volumes:
+      # Bind-mount the client limits so they can be edited at runtime and
+      # applied via POST /v1/admin/clients/reload -- no image rebuild.
+      - ./src/clients/clients.json:/app/dist/clients/clients.json:ro
     command: sh -c "node dist/db/migrate.js && node dist/server.js"
 
   analytics-worker:

@@ -1,5 +1,4 @@
 import type Redis from "ioredis";
-import { ClientRegistry } from "../clients/clientRegistry";
 import { RateLimiter } from "../rateLimiter/RateLimiter";
 import { EventStreamRecorder } from "../logging/eventStream";
 import type { Pool } from "pg";
@@ -9,11 +8,14 @@ export interface AppConfig {
   port: number;
   redisUrl: string;
   databaseUrl: string;
+  apiKey: string;
   circuitBreakerFailureThreshold: number;
   circuitBreakerResetTimeoutMs: number;
   redisCommandTimeoutMs: number;
   analyticsBatchSize: number;
   analyticsFlushIntervalMs: number;
+  analyticsStreamMaxLen: number;
+  selfIpLimitPerMinute: number;
 }
 
 export interface ClientLimitConfig {
@@ -46,13 +48,24 @@ export interface UsagePoint {
 }
 
 
+/**
+ * What the routes need from the client registry. An interface (rather than
+ * the concrete ClientRegistry class) so HTTP-layer tests can substitute a
+ * stub without touching the filesystem.
+ */
+export interface ClientDirectory {
+  getConfig(clientId: string): Promise<ClientLimitConfig | undefined>;
+  list(): ClientLimitConfig[];
+  reload(): number;
+}
+
 export interface RouteDeps {
   limiter: RateLimiter;
   events: EventStreamRecorder;
-  clients: ClientRegistry;
+  clients: ClientDirectory;
   redis: Redis;
   pool: Pool;
-} 
+}
 
 
 export type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';

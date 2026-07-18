@@ -2,6 +2,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { createPool } from './postgres';
 import { config } from '../config';
+import { logger } from '../logger';
 
 async function main(): Promise<void> {
   const pool = createPool(config.databaseUrl);
@@ -10,18 +11,17 @@ async function main(): Promise<void> {
 
   for (const file of files) {
     const sql = readFileSync(path.join(dir, file), 'utf8');
-    // eslint-disable-next-line no-console
-    console.log(`[migrate] applying ${file}`);
+    logger.info(`Applying migration ${file}`);
     await pool.query(sql);
   }
 
   await pool.end();
-  // eslint-disable-next-line no-console
-  console.log('[migrate] done');
+  logger.info('Migrations complete');
 }
 
 main().catch((err) => {
-  // eslint-disable-next-line no-console
-  console.error('[migrate] failed', err);
+  logger.error('Migration failed', {
+    error: err instanceof Error ? err.message : String(err),
+  });
   process.exit(1);
 });

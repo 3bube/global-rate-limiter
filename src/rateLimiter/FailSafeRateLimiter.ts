@@ -1,10 +1,17 @@
 import type { RateLimiter } from './RateLimiter';
+import type { ClientLimitLookup } from './RedisTokenBucketLimiter';
 import type { ClientLimitConfig, RateLimitResult, CircuitBreakerOptions } from '../types';
 import { CircuitBreaker } from './CircuitBreaker';
 
 export interface FailSafeOptions extends CircuitBreakerOptions {
   /** Hard timeout for a single Redis round trip before we treat it as a failure. */
   commandTimeoutMs: number;
+  /**
+   * Redis-independent (in-memory) config source used to report the client's
+   * real limit in fail-open responses, so degraded responses keep a sane
+   * shape instead of sentinel values.
+   */
+  fallbackConfig?: ClientLimitLookup;
   onDegraded?: (clientId: string, reason: string) => void;
 }
 
@@ -39,7 +46,7 @@ export class FailSafeRateLimiter implements RateLimiter {
   async checkAndConsume(clientId: string, cost = 1): Promise<RateLimitResult> {
     if (!this.breaker.canAttempt()) {
       this.options.onDegraded?.(clientId, 'circuit_open');
-      return this.failOpen(clientId, cost);
+      return this.failOpen(clientId);
     }
 
     try {
@@ -55,21 +62,38 @@ export class FailSafeRateLimiter implements RateLimiter {
         clientId,
         err instanceof Error ? err.message : 'unknown_error',
       );
-      return this.failOpen(clientId, cost);
+      return this.failOpen(clientId);
     }
   }
 
-  private failOpen(clientId: string, cost: number): RateLimitResult {
-    // We can't know the real remaining count without Redis, so we report a
-    // conservative placeholder and rely on `degraded: true` to signal that
-    // this number is not authoritative.
-    void clientId;
-    void cost;
+  private async failOpen(clientId: string): Promise<RateLimitResult> {
+    // Without Redis we can't know the real remaining count, but the client's
+    // configured limit lives in memory, so degraded responses can still keep
+    // the normal response shape (a consumer parsing X-RateLimit-Remaining as
+    // an unsigned integer must not suddenly receive "-1"). We report the
+    // full limit as remaining and rely on `degraded: true` / the
+    // X-RateLimit-Degraded header to flag that it is not authoritative.
+    let limitConfig: ClientLimitConfig | undefined;
+    try {
+      limitConfig = await this.options.fallbackConfig?.getConfig(clientId);
+    } catch {
+      limitConfig = undefined;
+    }
+    const now = Date.now();
+    if (limitConfig) {
+      return {
+        allowed: true,
+        remainingTokens: limitConfig.limit,
+        limit: limitConfig.limit,
+        resetAtMs: now + limitConfig.windowSeconds * 1000,
+        degraded: true,
+      };
+    }
     return {
       allowed: true,
-      remainingTokens: -1,
-      limit: -1,
-      resetAtMs: Date.now(),
+      remainingTokens: 0,
+      limit: 0,
+      resetAtMs: now,
       degraded: true,
     };
   }

@@ -8,6 +8,7 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:3000';
+const API_KEY = __ENV.API_KEY || 'dev-api-key';
 const CLIENTS = ['client-a', 'client-b'];
 
 export const options = {
@@ -32,7 +33,7 @@ export default function run() {
   const res = http.post(
     `${BASE_URL}/v1/check`,
     JSON.stringify({ clientId }),
-    { headers: { 'Content-Type': 'application/json' } },
+    { headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY } },
   );
 
   check(res, {
