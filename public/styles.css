@@ -1,0 +1,10 @@
+body { font-family: system-ui, sans-serif; max-width: 900px; margin: 40px auto; color: #1a1a1a; }
+h1 { font-size: 1.4rem; }
+.controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 24px; }
+select, button, input { padding: 6px 10px; font-size: 0.95rem; }
+.stats { display: flex; gap: 16px; margin-bottom: 24px; }
+.stat { border: 1px solid #ddd; border-radius: 8px; padding: 12px 16px; flex: 1; }
+.stat .label { font-size: 0.8rem; color: #666; }
+.stat .value { font-size: 1.4rem; font-weight: 600; }
+canvas { max-height: 360px; }
+#error { color: #cc3a21; margin-bottom: 16px; display: none; }
