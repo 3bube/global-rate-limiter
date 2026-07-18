@@ -1,6 +1,5 @@
 import { FailSafeRateLimiter } from '../../src/rateLimiter/FailSafeRateLimiter';
-import type { RateLimiter } from '../../src/rateLimiter/RateLimiter';
-import type { RateLimitResult } from '../../src/types';
+import type { RateLimiter, RateLimitResult } from '../../src/types';
 
 function okResult(): RateLimitResult {
   return { allowed: true, remainingTokens: 5, limit: 10, resetAtMs: Date.now() + 1000, degraded: false };

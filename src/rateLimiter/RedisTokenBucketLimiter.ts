@@ -1,8 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { Redis } from 'ioredis';
-import type { RateLimiter } from './RateLimiter';
-import type { ClientLimitConfig, RateLimitResult } from '../types';
+import type { RateLimiter, ClientLimitConfig, RateLimitResult } from '../types';
 
 const SCRIPT_PATH = path.join(__dirname, 'luaScripts', 'tokenBucket.lua');
 

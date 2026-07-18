@@ -1,6 +1,5 @@
-import type { RateLimiter } from './RateLimiter';
 import type { ClientLimitLookup } from './RedisTokenBucketLimiter';
-import type { ClientLimitConfig, RateLimitResult, CircuitBreakerOptions } from '../types';
+import type { RateLimiter, ClientLimitConfig, RateLimitResult, CircuitBreakerOptions } from '../types';
 import { CircuitBreaker } from './CircuitBreaker';
 
 export interface FailSafeOptions extends CircuitBreakerOptions {

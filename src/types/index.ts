@@ -1,5 +1,4 @@
 import type Redis from "ioredis";
-import { RateLimiter } from "../rateLimiter/RateLimiter";
 import { EventStreamRecorder } from "../logging/eventStream";
 import type { Pool } from "pg";
 
@@ -34,6 +33,16 @@ export interface RateLimitResult {
   limit: number;
   resetAtMs: number; // epoch ms when the bucket will be full again
   degraded: boolean; // true when the result came from a fail safe fallback
+}
+
+/**
+ * Contract every rate limiter implementation (and the fail-safe wrapper
+ * around it) satisfies. Keeping this as an interface means the API layer
+ * never depends on Redis directly -- it depends on this, which is what lets
+ * FailSafeRateLimiter transparently substitute a fallback strategy.
+ */
+export interface RateLimiter {
+  checkAndConsume(clientId: string, cost?: number): Promise<RateLimitResult>;
 }
 
 export interface UsageEvent {

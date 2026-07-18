@@ -4,8 +4,7 @@ import type { Pool } from 'pg';
 import { registerRoutes } from '../../src/api/routes';
 import { apiKeyAuth, selfRateLimit } from '../../src/api/auth';
 import type { EventStreamRecorder } from '../../src/logging/eventStream';
-import type { RateLimiter } from '../../src/rateLimiter/RateLimiter';
-import type { ClientDirectory, ClientLimitConfig, RateLimitResult } from '../../src/types';
+import type { ClientDirectory, ClientLimitConfig, RateLimiter, RateLimitResult } from '../../src/types';
 
 const API_KEY = 'test-key';
 
