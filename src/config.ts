@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import type { AppConfig } from './types';
 
-function requireEnv(name: string, fallback?: string): string {
+function readRequiredEnvString(name: string, fallback?: string): string {
   const value = process.env[name] ?? fallback;
   if (value === undefined) {
     throw new Error(`Missing required environment variable: ${name}`);
@@ -9,7 +9,7 @@ function requireEnv(name: string, fallback?: string): string {
   return value;
 }
 
-function intEnv(name: string, fallback: number): number {
+function readOptionalEnvInt(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined) return fallback;
   const parsed = Number.parseInt(raw, 10);
@@ -22,33 +22,38 @@ function intEnv(name: string, fallback: number): number {
 
 
 export const config: AppConfig = {
-  port: intEnv('PORT', 3000),
-  redisUrl: requireEnv('REDIS_URL', 'redis://localhost:6379'),
-  databaseUrl: requireEnv(
+  port: readOptionalEnvInt('PORT', 3000),
+  redisUrl: readRequiredEnvString('REDIS_URL', 'redis://localhost:6379'),
+  databaseUrl: readRequiredEnvString(
     'DATABASE_URL',
     'postgresql://ratelimiter:ratelimiter@localhost:5432/ratelimiter',
   ),
   // Shared secret for the /v1 API. The fallback exists so `npm run dev` works
   // out of the box; deployments must set a real value (docker-compose does).
-  apiKey: requireEnv('API_KEY', 'dev-api-key'),
-  circuitBreakerFailureThreshold: intEnv('CIRCUIT_BREAKER_FAILURE_THRESHOLD', 5),
-  circuitBreakerResetTimeoutMs: intEnv('CIRCUIT_BREAKER_RESET_TIMEOUT_MS', 10_000),
-  redisCommandTimeoutMs: intEnv('REDIS_COMMAND_TIMEOUT_MS', 75),
-  analyticsBatchSize: intEnv('ANALYTICS_BATCH_SIZE', 200),
-  analyticsFlushIntervalMs: intEnv('ANALYTICS_FLUSH_INTERVAL_MS', 1000),
+  apiKey: readRequiredEnvString('API_KEY', 'dev-api-key'),
+  circuitBreakerFailureThreshold: readOptionalEnvInt('CIRCUIT_BREAKER_FAILURE_THRESHOLD', 5),
+  circuitBreakerResetTimeoutMs: readOptionalEnvInt('CIRCUIT_BREAKER_RESET_TIMEOUT_MS', 10_000),
+  redisCommandTimeoutMs: readOptionalEnvInt('REDIS_COMMAND_TIMEOUT_MS', 75),
+  analyticsBatchSize: readOptionalEnvInt('ANALYTICS_BATCH_SIZE', 200),
+  analyticsFlushIntervalMs: readOptionalEnvInt('ANALYTICS_FLUSH_INTERVAL_MS', 1000),
   // Upper bound on the usage-events stream so a dead/slow worker can never
   // grow Redis without limit (which would eventually take the limiter down).
-  analyticsStreamMaxLen: intEnv('ANALYTICS_STREAM_MAXLEN', 100_000),
+  analyticsStreamMaxLen: readOptionalEnvInt('ANALYTICS_STREAM_MAXLEN', 100_000),
   // How long an entry may sit unacked in a dead consumer's pending list
   // before another consumer claims it (XAUTOCLAIM) instead of it being
   // stranded forever.
-  analyticsClaimMinIdleMs: intEnv('ANALYTICS_CLAIM_MIN_IDLE_MS', 60_000),
+  analyticsClaimMinIdleMs: readOptionalEnvInt('ANALYTICS_CLAIM_MIN_IDLE_MS', 60_000),
   // How often the worker sweeps for stale pending entries.
-  analyticsClaimSweepIntervalMs: intEnv('ANALYTICS_CLAIM_SWEEP_INTERVAL_MS', 30_000),
+  analyticsClaimSweepIntervalMs: readOptionalEnvInt('ANALYTICS_CLAIM_SWEEP_INTERVAL_MS', 30_000),
   // Per-source-IP budget for the limiter's own API (self-protection).
-  selfIpLimitPerMinute: intEnv('SELF_IP_LIMIT_PER_MINUTE', 600),
+  // Deliberately set well above the highest configured client limit
+  // (client-b: 5000/min) -- this service expects to sit behind shared
+  // egress (NAT/VPC/corporate proxy) for the N caller instances the brief
+  // describes, so a low per-IP cap would throttle many legitimate callers
+  // that merely share a source IP, not just a single abusive one.
+  selfIpLimitPerMinute: readOptionalEnvInt('SELF_IP_LIMIT_PER_MINUTE', 20_000),
   // Window length for the self rate limit above, and how many distinct IPs
   // to track before pruning/resetting to keep the in-memory map bounded.
-  selfRateLimitWindowMs: intEnv('SELF_RATE_LIMIT_WINDOW_MS', 60_000),
-  selfRateLimitMaxTrackedIps: intEnv('SELF_RATE_LIMIT_MAX_TRACKED_IPS', 10_000),
+  selfRateLimitWindowMs: readOptionalEnvInt('SELF_RATE_LIMIT_WINDOW_MS', 60_000),
+  selfRateLimitMaxTrackedIps: readOptionalEnvInt('SELF_RATE_LIMIT_MAX_TRACKED_IPS', 10_000),
 };

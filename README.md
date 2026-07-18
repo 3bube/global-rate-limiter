@@ -5,26 +5,22 @@ Vega IT Abuja Tech Challenge qualification task.
 
 ## Architecture (short version)
 
-```
-        ┌────────────┐      ┌─────────────┐
-Client →│  App (N     │──1──▶│    Redis    │  token-bucket state (Lua, atomic)
-        │  instances) │      │             │──2──▶ usage-events stream (XADD)
-        └─────┬──────┘      └──────┬──────┘
-              │                    │ 3 (XREADGROUP, batched)
-              │                    ▼
-              │             ┌─────────────┐
-              └────4────────▶│  Postgres   │  request_log (analytics/billing)
-           dashboard reads   └─────────────┘
-```
+Every `/v1` request — from a client or from the dashboard — goes through a load
+balancer to one of N app instances, authenticated with `x-api-key` and self-rate-limited
+per source IP.
 
 1. Every instance runs the same atomic Lua script against the same Redis, so it doesn't
-   matter which instance a request lands on — the bucket is shared, correct state.
-2. The hot path fires a non-blocking `XADD` to a Redis stream after deciding
-   allow/deny. It does not wait on Postgres.
-3. A separate `analytics-worker` process drains the stream in batches and writes to
-   Postgres, decoupling "billing-grade logging" from "must respond in a few ms".
-4. The dashboard (`/dashboard/dashboard.html`) queries Postgres through the API for
-   trend graphs and usage stats.
+   matter which instance a request lands on the bucket is shared, correct state.
+2. The hot path fires a non-blocking `XADD` to a bounded (`MAXLEN`-capped) Redis stream
+   after deciding allow/deny. It does not wait on Postgres.
+3. A separate `analytics-worker` process drains the stream in batches, writes to
+   Postgres with an idempotent insert (`ON CONFLICT (stream_id) DO NOTHING`), and
+   periodically sweeps for entries stranded by a dead consumer (`XAUTOCLAIM`) 
+   decoupling "billing-grade logging" from "must respond in a few ms" without losing
+   or double-counting events.
+4. The dashboard is just another authenticated caller: it queries the same API
+   (`/v1/clients/:id/usage`) for trend graphs and usage stats it does not talk to
+   Postgres directly.
 
 Full diagram: `docs/architecture.png`. Deeper explanation of *why* each piece is built
 this way, plus what to read to understand it: `docs/LEARNING.md`.
@@ -54,7 +50,9 @@ Every `/v1` endpoint requires an `x-api-key` header matching the `API_KEY` env v
 Requests without it get `401`. Unknown `clientId`s get `404` instead of a default
 bucket, so callers can't mint unbounded per-key state in Redis. The service also
 applies a per-source-IP budget to its own API (`SELF_IP_LIMIT_PER_MINUTE`, default
-600/min) so the limiter itself is not a free amplification target.
+20,000/min -- deliberately well above the highest configured client limit, since
+legitimate N-instance callers often share a source IP behind NAT/VPC egress) so the
+limiter itself is not a free amplification target for a single runaway caller.
 
 ### Changing client limits at runtime
 
@@ -122,10 +120,24 @@ npm test                   # everything above
   ~60s. Duplicate delivery cannot double-bill (unique `stream_id`).
 - **Graceful shutdown**: `docker compose stop app` sends SIGTERM; the server drains
   in-flight requests and closes its Redis/Postgres connections before exiting.
+- **Self rate limiting**: hit `/v1/check` more than `SELF_IP_LIMIT_PER_MINUTE` (default
+  20,000) times in a minute from one source — further requests get `429`
+  `{"error":"self_rate_limited"}` regardless of the client's own quota. To exercise this
+  manually without waiting that long, temporarily set a low value, e.g.
+  `SELF_IP_LIMIT_PER_MINUTE=20 docker compose up app -d --build`.
+- **Runtime config reload**: edit `src/clients/clients.json` (e.g. bump `client-a`'s
+  limit), then `curl -X POST localhost:3000/v1/admin/clients/reload -H 'x-api-key:
+  dev-api-key'` — the new limit applies immediately, no restart needed. Break the file
+  (invalid JSON or a negative limit) and reload again: it's rejected and the previous,
+  valid limits stay in effect.
 - **Race safety across instances**: run `npm run test:integration` and read
-  `raceCondition.integration.test.ts` — or scale the app for real with
-  `docker compose up --build --scale app=3` behind a load balancer of your choice and
-  hammer one client concurrently.
+  `raceCondition.integration.test.ts` — it fires 50 concurrent callers on separate
+  Redis connections against a shared bucket and asserts exactly `limit` are admitted,
+  which is what actually proves the atomicity property. Note: `docker compose up
+  --scale app=3` will *not* work as a literal demo as configured — the `app` service
+  publishes a fixed host port (`3000:3000`), so Compose can't bind three replicas to
+  it. A real multi-container demo would need that port mapping removed and a reverse
+  proxy/load balancer put in front instead.
 - **Burst vs. hard reset**: the token bucket refills continuously (see
   `src/rateLimiter/luaScripts/tokenBucket.lua`), so a client isn't handed a fresh full
   quota the instant a fixed window rolls over — check `tokenBucket.integration.test.ts`'s
@@ -134,20 +146,22 @@ npm test                   # everything above
 ## Project layout
 
 ```
+docs/
+  architecture.png
 src/
   rateLimiter/     token bucket (Redis + Lua), circuit breaker, fail-safe wrapper
-  clients/         per-client limit config
+  clients/         per-client limit config (validated, runtime-reloadable)
   logging/         Redis stream writer (hot path) + batch Postgres worker
   db/              Postgres pool + migrations
-  api/             Fastify routes + request/response schemas (zod)
+  api/             Fastify routes + auth (API key, self-rate-limit)
+  schemas/         zod request/response schemas
   server.ts        wiring/composition root
 public/
   dashboard.html   Chart.js usage dashboard
+  main.js          dashboard client logic (fetch, chart rendering)
+  styles.css       dashboard styling
 tests/
   unit/            no external dependencies
-  integration/     require a real Redis (docker compose up -d redis postgres)
+  integration/     require a real Redis + Postgres (docker compose up -d redis postgres)
   load/            k6 script
-docs/
-  architecture.png / architecture.md
-  LEARNING.md
 ```
